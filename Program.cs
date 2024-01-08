@@ -27,6 +27,7 @@ namespace BackendScraper
             var stopwatch = new Stopwatch();
             stopwatch.Start();
 
+            // Fix progress indicator on this, except here it just spins and resets with the number at the end being the total collected
             await GetPageUrls(rootUrl, rootUrl, uniquePageUrls);
             
             stopwatch.Stop();
@@ -160,27 +161,49 @@ namespace BackendScraper
 
         static async Task DownloadPage(string url, string rootUrl, string outputDirectory)
         {
-            // TODO
+            try 
+            {
+                await semaphore.WaitAsync();
+                var client = new HttpClient();
+                var html = await client.GetStringAsync(url);
+                semaphore.Release();
 
-            // Replace all internal href's with local file path 
-            
-            // Rough setup, it just downloads html atm
+                var doc = new HtmlDocument();
+                doc.LoadHtml(html);
 
-            await semaphore.WaitAsync();
-            var client = new HttpClient();
-            var pageContent = await client.GetStringAsync(url);
-            semaphore.Release();
+                string rootPath = outputDirectory;
+                string relativePath = GetRelativePath(url);
 
-            // Replace all url with the local file path
-            var localFilePath = Path.Combine(outputDirectory, url.Replace(rootUrl, "").Replace("/", "_") + ".html");
+                // Ensure directory exists
+                Directory.CreateDirectory(Path.Combine(rootPath, relativePath));
+                // Save html file
+                await File.WriteAllTextAsync(Path.Combine(rootPath, relativePath, "index.html"), html);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(localFilePath));
+                // Download remaining assets (e.g. styling, images, scripts)
+                var resourceUrls = GetResourceUrls(doc);
+                foreach (var resourceUrl in resourceUrls) 
+                {
+                    // Download
+                }
 
-            await File.WriteAllTextAsync(localFilePath, pageContent);
+            } 
+            catch (Exception ex) 
+            {
+                Console.WriteLine($"Error fetching {url}: {ex.Message}");
+            }
 
             // Increment the completed downloads count
             Interlocked.Increment(ref completedDownloads);
+        }
 
+        private static List<string> GetResourceUrls(HtmlDocument html)
+        {
+            return new List<string>();
+        }
+
+        private static string GetRelativePath(string url)
+        {
+            throw new NotImplementedException();
         }
     }
 }
