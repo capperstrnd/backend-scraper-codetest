@@ -24,8 +24,16 @@ extraction and DOM parsing. Or you can roll your own if you’re feeling product
 On top of the basics, we do appreciate it if your program displays a good use of
 *asynchronicity*, *parallelism* and *threading*.
 
-
 ## Commands
 
 Build: `dotnet build`
 Run: `dotnet run`
+
+## Packages used
+
+- https://html-agility-pack.net/
+
+## Notes and comments
+
+- I could have gone with arguments to run this, by having string[] args as input parameters to Main.
+- Have to manually delete the download folder if you've run it already if you want to rerun

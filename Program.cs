@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Threading.Tasks.Dataflow;
 using HtmlAgilityPack;
 
 namespace BackendScraper
@@ -11,6 +12,7 @@ namespace BackendScraper
         private static int maxRetries = 5; // Max Retries for HttpClient
         private static int maxParallelDownloads = 8;
         private static SemaphoreSlim semaphore = new SemaphoreSlim(12); // Limit concurrent requests
+        private static int completedDownloads = 0;
 
         static async Task Main()
         {
@@ -31,12 +33,43 @@ namespace BackendScraper
 
             Console.WriteLine($"Gathered {uniquePageUrls.Count} urls, it took {stopwatch.ElapsedMilliseconds / 1000}sec");
 
-            // TODO: Set up thread pooling to run things in parallell
+             // Configure thread pool
+            var downloadOptions = new ExecutionDataflowBlockOptions
+            {
+                MaxDegreeOfParallelism = maxParallelDownloads
+            };
 
-            // TODO: Some kind of progress indicator based on the number of pageUrls processed
+            // Use a BufferBlock to store URLs and propagate them to parallel downloads
+            var downloadBlock = new ActionBlock<string>(
+                async url => await DownloadPage(url, rootUrl, outputDirectory),
+                downloadOptions
+            );
+
+            foreach (var pageUrl in uniquePageUrls)
+            {
+                downloadBlock.Post(pageUrl);
+            }
+
+            // Progress indicator
+            int totalDownloads = uniquePageUrls.Count;
+
+            while (completedDownloads < totalDownloads)
+            {
+                int progressCompletedCapped = completedDownloads * 50 / totalDownloads;
+
+                Console.Write($"\rProgress: [{new string('#', progressCompletedCapped)}{new string('_', 50 - progressCompletedCapped)}] {completedDownloads * 100 / totalDownloads}%");
+                await Task.Delay(100);
+            }
+
+            // Signal the block and wait for all the downloads
+            downloadBlock.Complete();
+            await downloadBlock.Completion;
+
+            // Terminate to 100%
+            Console.Write($"\rProgress: [{new string('#', 50)}] {100}%");
         }
 
-        static async Task GetPageUrls(string rootUrl, string currentUrl, HashSet<string> uniquePageUrls, string prevUrl = "")
+        static async Task GetPageUrls(string rootUrl, string currentUrl, HashSet<string> uniquePageUrls)
         {
             int retryCount = 0;
 
@@ -125,11 +158,29 @@ namespace BackendScraper
             }
         }
 
-        static void DownloadPage(string url, string rootUrl, string outputDirectory)
+        static async Task DownloadPage(string url, string rootUrl, string outputDirectory)
         {
             // TODO
 
             // Replace all internal href's with local file path 
+            
+            // Rough setup, it just downloads html atm
+
+            await semaphore.WaitAsync();
+            var client = new HttpClient();
+            var pageContent = await client.GetStringAsync(url);
+            semaphore.Release();
+
+            // Replace all url with the local file path
+            var localFilePath = Path.Combine(outputDirectory, url.Replace(rootUrl, "").Replace("/", "_") + ".html");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(localFilePath));
+
+            await File.WriteAllTextAsync(localFilePath, pageContent);
+
+            // Increment the completed downloads count
+            Interlocked.Increment(ref completedDownloads);
+
         }
     }
 }
