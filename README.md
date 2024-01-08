@@ -26,7 +26,10 @@ On top of the basics, we do appreciate it if your program displays a good use of
 
 ## Commands
 
+Install necessary packages `Install-Package HtmlAgilityPack`
+
 Build: `dotnet build`
+
 Run: `dotnet run`
 
 ## Packages used
@@ -35,5 +38,19 @@ Run: `dotnet run`
 
 ## Notes and comments
 
-- I could have gone with arguments to run this, by having string[] args as input parameters to Main.
-- Have to manually delete the download folder if you've run it already if you want to rerun
+- Not exactly efficient with gathering all the Page URLs in a first phase and then Downloading in a secondary phase, as technically I've already traversed each page (at least) once before.
+    - But the assignment asked for progress indicators so now there's two versions (spinner and 0-100) 😅
+    - A better version would simply report back how many have been downloaded with the spinner, or perhaps use a sitemap when available to determine how many pages there are to download...
+- Downloaded files work locally, maintains file structure on disk
+    - Can navigate any link
+    - Images, scripts and styling are present
+    - The thing that seems to be missing are icons... Showing up as squares instead but I've spent a reasonable amount of time for this so ending it where it is now.
+- Parallellism/asynchronicity is in place, using ActionBlocks to post worker jobs (even recursively) and atomic operations to update the progress indicators.
+- Threadsafe operations and failsafes are in place
+    - There is a potential for a bug to appear and that is if multiple threads happen on to download the same resource (these were not indexed in a unique entries-only enumerable), but one of the threads will simply exception out and it will keep going.
+- Could use some refactoring (classes/methods) but as I said with the time, ending it where it is now.
+- The relative links were probably the most interesting challenge to account for 😄
+
+## Result
+
+![Console output from running the program](image.png)
