@@ -8,42 +8,76 @@ namespace BackendScraper
     class Program
     {
         private static string rootUrl = "https://books.toscrape.com/";
-        private static string outputDirectory = "./DownloadOutput";
+        private static string outputDirectory = "./DownloadOutput/";
         private static int maxRetries = 5; // Max Retries for HttpClient
-        private static int maxParallelDownloads = 8;
+        private static int maxParallelActivities = 8;
         private static SemaphoreSlim semaphore = new SemaphoreSlim(12); // Limit concurrent requests
+        private static int pageUrlsCollectorsRunning = 0;
+        private static int pageUrlsCollectorsDone = 0;
         private static int completedDownloads = 0;
+        static ActionBlock<string>? getPageUrlsBlock;
+        static HashSet<string> uniquePageUrls = new HashSet<string>();
+
 
         static async Task Main()
         {
-            HashSet<string> uniquePageUrls = new HashSet<string>();
-
             // Ensure output exists
             if (!Directory.Exists(outputDirectory))
                 Directory.CreateDirectory(outputDirectory);
+
+            // Configure thread pool
+            var bufferBlockOptions = new ExecutionDataflowBlockOptions
+            {
+                MaxDegreeOfParallelism = maxParallelActivities
+            };
 
             Console.WriteLine("Pre-fetching all page urls to download... Be patient, takes around 5-10 min.");
 
             var stopwatch = new Stopwatch();
             stopwatch.Start();
 
-            // Fix progress indicator on this, except here it just spins and resets with the number at the end being the total collected
-            await GetPageUrls(rootUrl, rootUrl, uniquePageUrls);
+            getPageUrlsBlock = new ActionBlock<string>(
+                async url => await GetPageUrls(url),
+                bufferBlockOptions
+            );
+
+            getPageUrlsBlock.Post(rootUrl);
             
+            int progressTicker = 0;
+            int sanityChecks = 0;
+
+            while (true) {
+                progressTicker++;
+                int progressSpinner = progressTicker % 51;
+
+                Console.Write($"\rProgress: [{new string('#', progressSpinner)}{new string('_', 50 - progressSpinner)}] {uniquePageUrls.Count} urls collected");
+                
+                if (pageUrlsCollectorsRunning == pageUrlsCollectorsDone)
+                    sanityChecks++;
+                else
+                    sanityChecks = 0;
+                
+                if (sanityChecks >= 3 && progressSpinner == 50) // checked 3 times, exit progress indicator neatly with 100%
+                    break;
+
+                // For faster debugging
+                // if (uniquePageUrls.Count > 100)
+                //     break;
+
+                await Task.Delay(100);
+            }
+
+            getPageUrlsBlock.Complete();
+            await getPageUrlsBlock.Completion;
+
             stopwatch.Stop();
 
-            Console.WriteLine($"Gathered {uniquePageUrls.Count} urls, it took {stopwatch.ElapsedMilliseconds / 1000}sec");
-
-             // Configure thread pool
-            var downloadOptions = new ExecutionDataflowBlockOptions
-            {
-                MaxDegreeOfParallelism = maxParallelDownloads
-            };
+            Console.WriteLine($"\nPage URL gathering took {stopwatch.ElapsedMilliseconds / 1000} seconds total");
 
             // Use a BufferBlock to store URLs and propagate them to parallel downloads
             var downloadBlock = new ActionBlock<string>(
                 async url => await DownloadPage(url, rootUrl, outputDirectory),
-                downloadOptions
+                bufferBlockOptions
             );
 
             foreach (var pageUrl in uniquePageUrls)
@@ -70,9 +104,10 @@ namespace BackendScraper
             Console.Write($"\rProgress: [{new string('#', 50)}] {100}%");
         }
 
-        static async Task GetPageUrls(string rootUrl, string currentUrl, HashSet<string> uniquePageUrls)
+        static async Task GetPageUrls(string currentUrl)
         {
             int retryCount = 0;
+            Interlocked.Increment(ref pageUrlsCollectorsRunning);
 
             try
             {
@@ -129,16 +164,18 @@ namespace BackendScraper
                 }
                 
                 // Continue fetching recursively
-                Parallel.ForEach(newUrls, newUrl => 
+                foreach(var newUrl in newUrls) 
                 {
                     uniquePageUrls.Add(newUrl);
-                    GetPageUrls(rootUrl, newUrl, uniquePageUrls).Wait();
-                });
+                    getPageUrlsBlock?.Post(newUrl);
+                };
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error on url {currentUrl}: {ex.Message}");
             }
+
+            Interlocked.Increment(ref pageUrlsCollectorsDone);
         }
 
         // Resolves relative paths if present - i.e. "../../" within the href
